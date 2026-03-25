@@ -10,13 +10,20 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
 from app.main import app
 from app.core.database import Base, get_db
 
-# ── Use a fresh in-memory DB for every test run — no leftover state ──────────
-TEST_DB = "sqlite:///./test_erp.db"
-engine = create_engine(TEST_DB, connect_args={"check_same_thread": False})
+# ── True in-memory DB — no file created, no cleanup needed, zero side effects ─
+# StaticPool required: without it each connection gets its own isolated in-memory DB,
+# so tables created in one connection are invisible to others.
+TEST_DB = "sqlite:///:memory:"
+engine = create_engine(
+    TEST_DB,
+    connect_args={"check_same_thread": False},
+    poolclass=StaticPool,  # share one connection — all see the same in-memory DB
+)
 TestSession = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 

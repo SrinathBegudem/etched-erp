@@ -110,6 +110,7 @@ def record_movement(payload: MovementCreate, db: Session = Depends(get_db)):
             detail=f"Insufficient stock. Current: {item.quantity_on_hand}, requested delta: {payload.quantity_delta}"
         )
 
+    previous_qty = item.quantity_on_hand  # capture BEFORE update
     movement = InventoryMovement(**payload.model_dump())
     item.quantity_on_hand = new_qty
     db.add(movement)
@@ -118,7 +119,7 @@ def record_movement(payload: MovementCreate, db: Session = Depends(get_db)):
     return {
         "message": "Movement recorded",
         "item": item.name,
-        "previous_qty": item.quantity_on_hand - payload.quantity_delta,
+        "previous_qty": previous_qty,
         "new_qty": new_qty,
         "low_stock_alert": new_qty <= item.reorder_threshold,
     }

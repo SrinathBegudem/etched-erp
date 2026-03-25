@@ -5,6 +5,7 @@ PO receipt automatically updates inventory — no manual sync needed.
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime
@@ -44,6 +45,13 @@ class POCreate(BaseModel):
 @router.get("/suppliers", summary="List all suppliers")
 def list_suppliers(db: Session = Depends(get_db)):
     suppliers = db.query(Supplier).all()
+    # Count active POs per supplier at DB level — avoids loading all POs into memory
+    active_po_counts = dict(
+        db.query(PurchaseOrder.supplier_id, func.count(PurchaseOrder.id))
+        .filter(PurchaseOrder.status.notin_(["received", "cancelled"]))
+        .group_by(PurchaseOrder.supplier_id)
+        .all()
+    )
     return [
         {
             "id": s.id,
@@ -51,7 +59,7 @@ def list_suppliers(db: Session = Depends(get_db)):
             "contact_email": s.contact_email,
             "lead_time_days": s.lead_time_days,
             "payment_terms_days": s.payment_terms_days,
-            "active_pos": len([po for po in s.purchase_orders if po.status not in ["received", "cancelled"]]),
+            "active_pos": active_po_counts.get(s.id, 0),
         }
         for s in suppliers
     ]
@@ -144,6 +152,9 @@ def receive_po(po_id: int, db: Session = Depends(get_db)):
     Weighted average cost formula:
       new_unit_cost = (existing_qty * old_cost + incoming_qty * po_unit_price)
                       / (existing_qty + incoming_qty)
+
+    This ensures inventory valuation always reflects actual landed cost,
+    not just the last purchase price.
     """
     po = db.query(PurchaseOrder).filter(PurchaseOrder.id == po_id).first()
     if not po:
@@ -157,27 +168,32 @@ def receive_po(po_id: int, db: Session = Depends(get_db)):
     for li in po.line_items:
         item = db.query(InventoryItem).filter(InventoryItem.id == li.item_id).first()
 
+        # Weighted average cost — standard inventory valuation method
         existing_qty = item.quantity_on_hand
         existing_cost = item.unit_cost
         incoming_qty = li.quantity
         incoming_cost = li.unit_price
 
         total_qty = existing_qty + incoming_qty
-        new_unit_cost = round(
-            (existing_qty * existing_cost + incoming_qty * incoming_cost) / total_qty, 4
-        ) if total_qty > 0 else incoming_cost
+        if total_qty > 0:
+            new_unit_cost = round(
+                (existing_qty * existing_cost + incoming_qty * incoming_cost) / total_qty, 4
+            )
+        else:
+            new_unit_cost = incoming_cost
 
         old_valuation = round(existing_qty * existing_cost, 2)
         item.quantity_on_hand = total_qty
         item.unit_cost = new_unit_cost
         new_valuation = round(total_qty * new_unit_cost, 2)
 
-        db.add(InventoryMovement(
+        movement = InventoryMovement(
             item_id=item.id,
             quantity_delta=incoming_qty,
             reason="PO receipt",
             reference_id=po.po_number,
-        ))
+        )
+        db.add(movement)
 
         updated_items.append({
             "sku": item.sku,

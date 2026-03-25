@@ -15,6 +15,8 @@ from app.models.models import Invoice, Supplier, PurchaseOrder, InvoiceStatus
 router = APIRouter(prefix="/finance", tags=["Finance"])
 
 
+# ─── SCHEMAS ─────────────────────────────────────────────────────────────────
+
 class InvoiceCreate(BaseModel):
     invoice_number: str
     purchase_order_id: Optional[int] = None
@@ -23,6 +25,8 @@ class InvoiceCreate(BaseModel):
     currency: str = "USD"
     due_date: Optional[datetime] = None
 
+
+# ─── ROUTES ──────────────────────────────────────────────────────────────────
 
 @router.get("/invoices", summary="List all invoices with optional status filter")
 def list_invoices(status: Optional[str] = None, supplier_id: Optional[int] = None, db: Session = Depends(get_db)):
@@ -49,12 +53,17 @@ def list_invoices(status: Optional[str] = None, supplier_id: Optional[int] = Non
 
 @router.post("/invoices", summary="Create an invoice")
 def create_invoice(payload: InvoiceCreate, db: Session = Depends(get_db)):
-    if not db.query(Supplier).filter(Supplier.id == payload.supplier_id).first():
+    supplier = db.query(Supplier).filter(Supplier.id == payload.supplier_id).first()
+    if not supplier:
         raise HTTPException(status_code=404, detail="Supplier not found")
-    if db.query(Invoice).filter(Invoice.invoice_number == payload.invoice_number).first():
+
+    existing = db.query(Invoice).filter(Invoice.invoice_number == payload.invoice_number).first()
+    if existing:
         raise HTTPException(status_code=400, detail=f"Invoice '{payload.invoice_number}' already exists")
+
     if payload.purchase_order_id:
-        if not db.query(PurchaseOrder).filter(PurchaseOrder.id == payload.purchase_order_id).first():
+        po = db.query(PurchaseOrder).filter(PurchaseOrder.id == payload.purchase_order_id).first()
+        if not po:
             raise HTTPException(status_code=404, detail="Purchase order not found")
 
     invoice = Invoice(**payload.model_dump())
@@ -87,15 +96,22 @@ def mark_paid(invoice_id: int, db: Session = Depends(get_db)):
 
 @router.get("/summary", summary="Financial summary — payables, cash flow snapshot")
 def financial_summary(db: Session = Depends(get_db)):
+    """
+    Lightweight financial snapshot — no complex aggregation pipelines needed.
+    Designed to be the data source for executive dashboards or forecasting tools.
+    """
     all_invoices = db.query(Invoice).all()
+
     total_payable = sum(i.amount for i in all_invoices if i.status == InvoiceStatus.PENDING)
     total_paid = sum(i.amount for i in all_invoices if i.status == InvoiceStatus.PAID)
     total_overdue = sum(i.amount for i in all_invoices if i.status == InvoiceStatus.OVERDUE)
 
+    # Per-supplier breakdown
+    # Load all suppliers once — avoids N+1 query (one DB hit per invoice in a loop)
+    supplier_map = {s.id: s.name for s in db.query(Supplier).all()}
     supplier_breakdown = {}
     for inv in all_invoices:
-        supplier = db.query(Supplier).filter(Supplier.id == inv.supplier_id).first()
-        name = supplier.name if supplier else "Unknown"
+        name = supplier_map.get(inv.supplier_id, "Unknown")
         if name not in supplier_breakdown:
             supplier_breakdown[name] = {"pending": 0.0, "paid": 0.0, "overdue": 0.0}
         supplier_breakdown[name][inv.status] = supplier_breakdown[name].get(inv.status, 0.0) + inv.amount
