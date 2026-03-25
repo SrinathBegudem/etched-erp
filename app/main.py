@@ -1,14 +1,20 @@
 """
 Etched ERP — Lightweight, scalable, zero-bloat.
+
+Architecture decisions documented here:
 - FastAPI: async-ready, auto-docs, minimal overhead
 - SQLite → Postgres-ready: swap one connection string, nothing else changes
-- Modular routes: each domain is independent and extractable
+- SQLAlchemy ORM: clean models, no raw SQL scattered everywhere
+- Modular routes: each domain (inventory, suppliers, finance) is independent
+- No heavy frameworks, no external queues, no microservices overhead — yet.
+  When scale demands it, each module can be extracted into its own service.
 """
 
 from fastapi import FastAPI
 from app.core.database import engine, Base
 from app.routes import inventory, suppliers, finance
 
+# Create all tables on startup — no migration tool needed at this scale
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(
@@ -25,6 +31,7 @@ app = FastAPI(
 - No over-engineering. No external dependencies beyond what's needed.
 - Every stock change is audited via InventoryMovement records.
 - PO receipt automatically syncs inventory — no manual steps.
+- Financial summary endpoint is designed to feed dashboards or forecasting tools directly.
 - SQLite today → Postgres tomorrow. One line change.
     """,
     version="0.1.0",
@@ -48,4 +55,14 @@ def root():
 
 @app.get("/health", tags=["Health"])
 def health():
-    return {"status": "healthy"}
+    # Basic liveness + DB connectivity check.
+    # In production, extend this to check each critical dependency
+    # (external APIs, cache, queue) and return per-service status —
+    # so load balancers and monitoring tools get a real signal, not a hardcoded one.
+    try:
+        from sqlalchemy import text
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        return {"status": "healthy", "database": "connected"}
+    except Exception as e:
+        return {"status": "unhealthy", "database": "down", "error": str(e)}
