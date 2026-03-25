@@ -222,26 +222,28 @@ This is the real work in integrations — not the happy path, but the "every ven
 
 ---
 
-## How to Run Everything
+## A Note on AI Usage
 
-```bash
-# Clone and install
-git clone https://github.com/SrinathBegudem/etched-erp
-cd etched-erp
-pip install -r requirements.txt
+I used Claude and Claude Code to build this project. I want to be upfront about what that means and what it doesn't mean.
 
-# Run automated tests — proves full workflow in one command
-pytest -v
+**What AI helped with:**
+- Boilerplate code — SQLAlchemy model setup, FastAPI router scaffolding, Pydantic schema structure. This is the kind of repetitive structural code that follows well-known patterns. AI generates it correctly and quickly, and I verified every line.
+- Initial file structure suggestions
+- Catching syntax issues during iteration
 
-# Start the server
-uvicorn app.main:app --reload
+**What I did myself:**
+- Every architectural decision in this document — FastAPI vs Django, SQLite vs Postgres, movement table design, weighted average cost formula, modular route structure, the normalizer approach for messy APIs. None of that came from AI. Those are judgment calls that require understanding the problem.
+- The external API normalizer logic — the field extraction patterns, the fallback strategy, the warning system. That's domain-specific thinking.
+- The test design — what to assert, what the full flow should look like, using an in-memory DB override so tests don't pollute production data.
+- Identifying that the original scraper architecture at Nethermind was wrong and needed a full redesign. That was observation and judgment, not code generation.
 
-# Interactive API docs
-open http://localhost:8000/docs
+**My honest view on AI-assisted development:**
 
-# Demo the external API normalizer
-python scripts/external_api.py
-```
+I think the engineers who will be most effective in the next few years are the ones who use AI to move faster on the mechanical parts and spend their own judgment on the parts that actually require thinking. Copy-pasting AI output without understanding it is how you get systems that work until they don't, with nobody who knows why.
+
+I test everything I build. I can explain every design decision in this repo. If something doesn't work or a decision was wrong, I own that — not the tool I used.
+
+I'm still learning how to use these tools well. But I'd rather be honest about that than pretend I typed every character by hand.
 
 ---
 
